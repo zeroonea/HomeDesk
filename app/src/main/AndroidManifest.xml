@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- web notifications from apps (NotificationBridge); Android 13+ asks the user -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.HomeDesk"
+        android:usesCleartextTraffic="true"
+        android:allowBackup="true">
+
+        <!-- Site list (the app's home screen). -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".UsageActivity"
+            android:exported="false"
+            android:label="Usage" />
+
+        <!--
+          One full-screen WebView per site. documentLaunchMode=intoExisting gives every site its own
+          entry in Android's Recents (intent data = homedesk://site/<id>), so several apps stay open
+          side by side and switching between them does not reload anything.
+          configChanges: rotating or folding/unfolding must not recreate the activity (that would
+          drop the remote session).
+        -->
+        <activity
+            android:name=".WebActivity"
+            android:exported="false"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="true"
+            android:theme="@style/Theme.HomeDesk.Web"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|fontScale|layoutDirection" />
+    </application>
+</manifest>

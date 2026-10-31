@@ -1,0 +1,11 @@
+build/
+app/build/
+.gradle/
+local.properties
+*.iml
+.idea/
+# signing key: never commit (GitHub Actions gets it from repository secrets)
+keystore/
+*.jks
+HomeDesk.apk
+*.apk
