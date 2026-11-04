@@ -56,6 +56,10 @@ In HomeDesk every saved web page is called an **app**.
   microphone permission once (if refused for good, HomeDesk offers Android's settings). Pages outside the app's own
   address (tabs) are asked every time and never remembered. Camera requests are refused.
 - **Sound:** pages can play sound without a tap first (autoplay is on), also while the window is in the background.
+- **Read aloud:** WebView has no Web Speech synthesis, so a page's "listen" / read-aloud button stayed silent.
+  `SpeechBridge` replaces `speechSynthesis` and `SpeechSynthesisUtterance` on every page with Android's text-to-speech
+  (the phone's TTS engine and its voices; language, voice, rate, pitch and volume are honoured; plays at media volume).
+  No permission needed. Speech stops when the page changes. Pause/resume are not supported (Android TTS has none).
 - HTTP basic auth gets a sign-in dialog with "Remember on this phone". The login is stored in
   the app's private storage (not encrypted). If a saved login is rejected, the dialog shows again.
 - Pages keep running in the background (not paused), so remote sessions stay connected while you use other apps,

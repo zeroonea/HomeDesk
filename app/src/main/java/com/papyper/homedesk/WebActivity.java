@@ -73,6 +73,7 @@ public class WebActivity extends Activity {
     private ClipboardBridge clipboard;
     private NotificationBridge notifications;
     private MediaPermissions media;
+    private SpeechBridge speech;
 
     // tabs + browser bar
     private boolean isTab;
@@ -120,6 +121,7 @@ public class WebActivity extends Activity {
         clipboard = new ClipboardBridge(this, holder);
         notifications = new NotificationBridge(this, holder);
         media = new MediaPermissions(this, holder);
+        speech = new SpeechBridge(this);
         site = siteFrom(getIntent());
         tabStartUrl = getIntent().getStringExtra(EXTRA_TAB_URL);
         isTab = tabStartUrl != null;
@@ -233,6 +235,8 @@ public class WebActivity extends Activity {
             notifications.uninstall();
         if (media != null)
             media.release();
+        if (speech != null)
+            speech.release();
         if (web != null) {
             root.removeView(web);
             web.destroy();
@@ -437,6 +441,7 @@ public class WebActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT));
         clipboard.install(web);
         notifications.install(web);
+        speech.install(web);
     }
 
     // ---- back button: a menu, never a silent exit ----
@@ -738,6 +743,7 @@ public class WebActivity extends Activity {
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
             hideError(); // a failed load shows it again in onReceivedError
+            speech.onPageStarted();
             progress.setVisibility(View.VISIBLE);
             updateBrowserBar(url);
         }
