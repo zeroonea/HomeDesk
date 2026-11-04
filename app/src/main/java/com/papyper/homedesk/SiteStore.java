@@ -22,13 +22,14 @@ final class SiteStore {
         boolean keyboardOverlay = false; // true: keyboard covers the page; false: page shrinks above it
         String clipboard = ClipboardBridge.ASK; // ask / allow / block reading the phone's clipboard
         String notifications = ClipboardBridge.ASK; // ask / allow / block web notifications
+        String microphone = ClipboardBridge.ASK;    // ask / allow / block recording (MediaPermissions)
 
         JSONObject toJson() throws JSONException {
             return new JSONObject()
                     .put("id", id).put("name", name).put("url", url)
                     .put("fullScreen", fullScreen).put("keepScreenOn", keepScreenOn)
                     .put("keyboardOverlay", keyboardOverlay).put("clipboard", clipboard)
-                    .put("notifications", notifications);
+                    .put("notifications", notifications).put("microphone", microphone);
         }
 
         static Site fromJson(JSONObject o) {
@@ -41,6 +42,7 @@ final class SiteStore {
             s.keyboardOverlay = o.optBoolean("keyboardOverlay", false);
             s.clipboard = o.optString("clipboard", ClipboardBridge.ASK);
             s.notifications = o.optString("notifications", ClipboardBridge.ASK);
+            s.microphone = o.optString("microphone", ClipboardBridge.ASK);
             return s;
         }
     }

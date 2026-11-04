@@ -217,11 +217,13 @@ public class MainActivity extends Activity {
         CheckBox startSite = new CheckBox(this);
         startSite.setText("Open automatically when HomeDesk starts");
 
-        // permissions Chrome would ask for; HomeDesk asks once and remembers (Clipboard/NotificationBridge)
+        // permissions Chrome would ask for; HomeDesk asks once and remembers (Clipboard/NotificationBridge, MediaPermissions)
         TextView clipLabel = settingLabel("Clipboard (paste from this phone)");
         android.widget.RadioGroup clip = modeChooser(isNew ? ClipboardBridge.ASK : site.clipboard);
         TextView notifyLabel = settingLabel("Notifications");
         android.widget.RadioGroup notify = modeChooser(isNew ? ClipboardBridge.ASK : site.notifications);
+        TextView micLabel = settingLabel("Microphone (record voice)");
+        android.widget.RadioGroup mic = modeChooser(isNew ? ClipboardBridge.ASK : site.microphone);
 
         if (isNew) {
             keepOn.setChecked(true);
@@ -243,6 +245,8 @@ public class MainActivity extends Activity {
         form.addView(clip);
         form.addView(notifyLabel);
         form.addView(notify);
+        form.addView(micLabel);
+        form.addView(mic);
         android.widget.ScrollView scroll = new android.widget.ScrollView(this); // fits the small cover screen
         scroll.addView(form);
 
@@ -271,6 +275,7 @@ public class MainActivity extends Activity {
             s.keyboardOverlay = overlay.isChecked();
             s.clipboard = modeOf(clip);
             s.notifications = modeOf(notify);
+            s.microphone = modeOf(mic);
             if (isNew)
                 sites.add(s);
             if (startSite.isChecked())

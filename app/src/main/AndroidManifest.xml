@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- web notifications from apps (NotificationBridge); Android 13+ asks the user -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- microphone for web pages (getUserMedia, MediaPermissions); Android asks the user.
+         MODIFY_AUDIO_SETTINGS lets WebView's WebRTC switch audio routing/echo cancellation (no prompt). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <application
         android:label="@string/app_name"

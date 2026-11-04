@@ -50,6 +50,12 @@ In HomeDesk every saved web page is called an **app**.
   **Notifications** setting in Edit), then Android asks its own permission once (if refused for good, HomeDesk offers
   Android's settings). Same tag replaces the earlier notification. Tapping one brings back that window and fires the
   page's onclick. Works while the window is open (also in the background); no push after it is closed.
+- **Microphone:** WebView refuses every getUserMedia request unless the app grants it, so voice recording and
+  Guacamole audio input never worked. `MediaPermissions` now answers it like Chrome: when a page asks, HomeDesk asks
+  Allow / Block / Not now (the app's **Microphone** setting in Edit: Ask / Allow / Block), then Android asks its own
+  microphone permission once (if refused for good, HomeDesk offers Android's settings). Pages outside the app's own
+  address (tabs) are asked every time and never remembered. Camera requests are refused.
+- **Sound:** pages can play sound without a tap first (autoplay is on), also while the window is in the background.
 - HTTP basic auth gets a sign-in dialog with "Remember on this phone". The login is stored in
   the app's private storage (not encrypted). If a saved login is rejected, the dialog shows again.
 - Pages keep running in the background (not paused), so remote sessions stay connected while you use other apps,

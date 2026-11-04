@@ -72,6 +72,7 @@ public class WebActivity extends Activity {
 
     private ClipboardBridge clipboard;
     private NotificationBridge notifications;
+    private MediaPermissions media;
 
     // tabs + browser bar
     private boolean isTab;
@@ -118,6 +119,7 @@ public class WebActivity extends Activity {
         };
         clipboard = new ClipboardBridge(this, holder);
         notifications = new NotificationBridge(this, holder);
+        media = new MediaPermissions(this, holder);
         site = siteFrom(getIntent());
         tabStartUrl = getIntent().getStringExtra(EXTRA_TAB_URL);
         isTab = tabStartUrl != null;
@@ -168,6 +170,7 @@ public class WebActivity extends Activity {
         usage.countOpen(site.id);
         clipboard.onAppReopened();
         notifications.onAppReopened();
+        media.onAppReopened();
         onScreenSince = System.currentTimeMillis();
         handler.postDelayed(saveUsage, 60_000);
         // pick up edits made in the site list while this page stayed open
@@ -199,6 +202,8 @@ public class WebActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, results);
         if (requestCode == NotificationBridge.REQ_PERMISSION && notifications != null)
             notifications.onAndroidAnswer();
+        if (requestCode == MediaPermissions.REQ_PERMISSION && media != null)
+            media.onAndroidAnswer();
     }
 
     @Override
@@ -226,6 +231,8 @@ public class WebActivity extends Activity {
             clipboard.uninstall();
         if (notifications != null)
             notifications.uninstall();
+        if (media != null)
+            media.release();
         if (web != null) {
             root.removeView(web);
             web.destroy();
@@ -847,6 +854,17 @@ public class WebActivity extends Activity {
             pageTitle = title;
             if (isTab)
                 Icons.setTaskDescription(WebActivity.this, site, windowLabel());
+        }
+
+        /** getUserMedia: microphone only, per the app's Microphone setting (MediaPermissions). */
+        @Override
+        public void onPermissionRequest(android.webkit.PermissionRequest request) {
+            media.onRequest(request);
+        }
+
+        @Override
+        public void onPermissionRequestCanceled(android.webkit.PermissionRequest request) {
+            media.onCanceled(request);
         }
 
         @Override
