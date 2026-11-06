@@ -23,13 +23,15 @@ final class SiteStore {
         String clipboard = ClipboardBridge.ASK; // ask / allow / block reading the phone's clipboard
         String notifications = ClipboardBridge.ASK; // ask / allow / block web notifications
         String microphone = ClipboardBridge.ASK;    // ask / allow / block recording (MediaPermissions)
+        boolean desktop = false;          // ask websites for their computer version (desktop user agent)
 
         JSONObject toJson() throws JSONException {
             return new JSONObject()
                     .put("id", id).put("name", name).put("url", url)
                     .put("fullScreen", fullScreen).put("keepScreenOn", keepScreenOn)
                     .put("keyboardOverlay", keyboardOverlay).put("clipboard", clipboard)
-                    .put("notifications", notifications).put("microphone", microphone);
+                    .put("notifications", notifications).put("microphone", microphone)
+                    .put("desktop", desktop);
         }
 
         static Site fromJson(JSONObject o) {
@@ -43,6 +45,7 @@ final class SiteStore {
             s.clipboard = o.optString("clipboard", ClipboardBridge.ASK);
             s.notifications = o.optString("notifications", ClipboardBridge.ASK);
             s.microphone = o.optString("microphone", ClipboardBridge.ASK);
+            s.desktop = o.optBoolean("desktop", false);
             return s;
         }
     }

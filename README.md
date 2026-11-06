@@ -31,6 +31,9 @@ In HomeDesk every saved web page is called an **app**.
   and apps ranked by time with how often each was opened. Tap an app there (or ⋮ › Usage) for that app alone.
   Only time an app is on screen counts (a card waiting in Recents doesn't). The data stays on the phone for 90 days;
   ⋮ › Clear usage history on the Usage screen deletes it, and deleting an app deletes its history.
+- **Desktop site** (per app, in Edit, or Back › Desktop site / Mobile site on the page, which reloads it): asks the
+  website for its computer version with a desktop Chrome (Linux) user agent and "not mobile" client hints, like
+  Chrome's Desktop site.
 - Per-app options: full screen, keep screen on, open at start, and **keyboard covers the page**. Turn that last one on
   for remote desktop pages such as Guacamole, whose mobile layouts expect the keyboard to overlay the page (like Chrome's
   `interactive-widget=overlays-content`), and the app blurs the text field when the keyboard closes.

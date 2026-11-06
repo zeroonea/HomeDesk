@@ -220,6 +220,8 @@ public class MainActivity extends Activity {
         keepOn.setText("Keep screen on");
         CheckBox overlay = new CheckBox(this);
         overlay.setText("Keyboard covers the page instead of shrinking it (best for remote desktop pages)");
+        CheckBox desktop = new CheckBox(this);
+        desktop.setText("Desktop site (ask the website for its computer version)");
         CheckBox startSite = new CheckBox(this);
         startSite.setText("Open automatically when HomeDesk starts");
 
@@ -239,6 +241,7 @@ public class MainActivity extends Activity {
             fullScreen.setChecked(site.fullScreen);
             keepOn.setChecked(site.keepScreenOn);
             overlay.setChecked(site.keyboardOverlay);
+            desktop.setChecked(site.desktop);
             startSite.setChecked(store.startSiteId() == site.id);
         }
         form.addView(name);
@@ -246,6 +249,7 @@ public class MainActivity extends Activity {
         form.addView(fullScreen);
         form.addView(keepOn);
         form.addView(overlay);
+        form.addView(desktop);
         form.addView(startSite);
         form.addView(clipLabel);
         form.addView(clip);
@@ -279,6 +283,7 @@ public class MainActivity extends Activity {
             s.fullScreen = fullScreen.isChecked();
             s.keepScreenOn = keepOn.isChecked();
             s.keyboardOverlay = overlay.isChecked();
+            s.desktop = desktop.isChecked();
             s.clipboard = modeOf(clip);
             s.notifications = modeOf(notify);
             s.microphone = modeOf(mic);

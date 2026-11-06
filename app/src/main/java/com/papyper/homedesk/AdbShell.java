@@ -36,7 +36,9 @@ import java.security.SecureRandom;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
 import java.security.spec.PKCS8EncodedKeySpec;
+import java.lang.reflect.Field;
 import java.util.Date;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -45,10 +47,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.regex.Pattern;
 
 import io.github.muntashirakon.adb.AbsAdbConnectionManager;
+import io.github.muntashirakon.adb.AdbConnection;
 import io.github.muntashirakon.adb.AdbPairingRequiredException;
 import io.github.muntashirakon.adb.AdbStream;
 import io.github.muntashirakon.adb.android.AdbMdns;
@@ -91,6 +96,8 @@ final class AdbShell {
         t.setDaemon(true);
         return t;
     });
+    /** The exit-code line run() appends to every command. */
+    private static final Pattern RC_LINE = Pattern.compile("__rc=-?\\d+\\r?\\n");
     /** Last Wireless debugging address that worked (its port changes when Wireless debugging is turned on). */
     private static volatile InetSocketAddress lastConnect;
 
@@ -185,12 +192,22 @@ final class AdbShell {
         Manager m = new Manager(c);
         try {
             connect(c, m);
-            try (AdbStream s = m.openStream("shell:" + command); InputStream in = s.openInputStream()) {
+            try (AdbStream s = open(m, "shell:" + command); InputStream in = s.openInputStream()) {
+                // Read until the "__rc=N" line run() appends, not until the stream closes: libadb wakes the
+                // stream object on close, but the reader waits on its read queue, so waiting for the end can hang.
                 ByteArrayOutputStream buf = new ByteArrayOutputStream();
                 byte[] b = new byte[4096];
-                int n;
-                while ((n = in.read(b)) >= 0)
+                while (!RC_LINE.matcher(buf.toString(StandardCharsets.UTF_8.name())).find()) {
+                    int n;
+                    try {
+                        n = in.read(b);
+                    } catch (IOException closed) {
+                        break; // "Stream closed." once the peer closed and everything was read
+                    }
+                    if (n < 0)
+                        break;
                     buf.write(b, 0, n);
+                }
                 return buf.toString(StandardCharsets.UTF_8.name());
             }
         } finally {
@@ -198,6 +215,47 @@ final class AdbShell {
                 m.disconnect();
             } catch (IOException ignored) {
             }
+        }
+    }
+
+    /**
+     * libadb's AdbConnection.open() sends OPEN and only then waits on the new stream for the OKAY. On the same
+     * device the OKAY can arrive (and its notify() be lost) before the wait starts, which then never returns.
+     * While open() runs, this keeps waking every pending stream; open() returning early is harmless because
+     * HomeDesk only reads, and reads wait on their own queue.
+     */
+    private static AdbStream open(Manager m, String destination) throws Exception {
+        AdbConnection connection = m.getAdbConnection();
+        AtomicBoolean opened = new AtomicBoolean();
+        Thread nudger = new Thread(() -> {
+            Map<?, ?> streams;
+            try {
+                Field f = AdbConnection.class.getDeclaredField("mOpenedStreams");
+                f.setAccessible(true);
+                streams = (Map<?, ?>) f.get(connection);
+            } catch (ReflectiveOperationException e) {
+                return;
+            }
+            while (!opened.get()) {
+                try {
+                    Thread.sleep(150);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                for (Object stream : streams.values()) {
+                    synchronized (stream) {
+                        stream.notifyAll();
+                    }
+                }
+            }
+        }, "adb-open-nudge");
+        nudger.setDaemon(true);
+        nudger.start();
+        try {
+            return m.openStream(destination);
+        } finally {
+            opened.set(true);
+            nudger.interrupt();
         }
     }
 

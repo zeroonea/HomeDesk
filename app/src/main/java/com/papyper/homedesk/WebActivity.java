@@ -46,6 +46,12 @@ import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import androidx.webkit.UserAgentMetadata;
+import androidx.webkit.WebSettingsCompat;
+import androidx.webkit.WebViewFeature;
 
 /**
  * One app, full screen: just a WebView, no address bar. Back opens a small menu instead of leaving
@@ -74,6 +80,10 @@ public class WebActivity extends Activity {
     private NotificationBridge notifications;
     private MediaPermissions media;
     private SpeechBridge speech;
+
+    // desktop site: what the WebView currently has (null = not applied yet) and WebView's own client hints
+    private Boolean desktopApplied;
+    private UserAgentMetadata defaultUaMetadata;
 
     // tabs + browser bar
     private boolean isTab;
@@ -265,6 +275,7 @@ public class WebActivity extends Activity {
                 : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
         getWindow().setAttributes(lp);
         applySystemBars();
+        applyDesktopMode();
         fsButton.setImageResource(site.fullScreen ? R.drawable.ic_fullscreen_exit : R.drawable.ic_fullscreen);
         fsButton.setContentDescription(site.fullScreen ? "Exit full screen" : "Full screen");
         root.requestApplyInsets();
@@ -363,6 +374,47 @@ public class WebActivity extends Activity {
         applySiteSettings();
     }
 
+    private void toggleDesktop() {
+        site.desktop = !site.desktop;
+        new SiteStore(this).update(site);
+        applySiteSettings(); // reloads the page with the other user agent
+    }
+
+    /**
+     * Desktop site, like Chrome's: a desktop Chrome user agent (and "not mobile" in the user-agent client hints,
+     * when this WebView supports setting them). Reloads the page when it changes on an open page.
+     */
+    private void applyDesktopMode() {
+        if (web == null || (desktopApplied != null && desktopApplied == site.desktop))
+            return;
+        boolean reload = desktopApplied != null && web.getUrl() != null;
+        desktopApplied = site.desktop;
+        WebSettings s = web.getSettings();
+        s.setUserAgentString(site.desktop ? desktopUserAgent() : null); // null: WebView's own
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
+            try {
+                if (defaultUaMetadata == null)
+                    defaultUaMetadata = WebSettingsCompat.getUserAgentMetadata(s);
+                WebSettingsCompat.setUserAgentMetadata(s, site.desktop
+                        ? new UserAgentMetadata.Builder(defaultUaMetadata)
+                                .setMobile(false).setPlatform("Linux").setPlatformVersion("").setModel("").build()
+                        : defaultUaMetadata);
+            } catch (RuntimeException ignored) {
+                // client hints stay as they were; the user agent string alone decides for most sites
+            }
+        }
+        if (reload)
+            web.reload();
+    }
+
+    /** Desktop Chrome on Linux with this WebView's Chrome version (major only, like Chrome's reduced UA). */
+    private String desktopUserAgent() {
+        Matcher m = Pattern.compile("Chrome/(\\d+)").matcher(WebSettings.getDefaultUserAgent(this));
+        String major = m.find() ? m.group(1) : "130";
+        return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + major
+                + ".0.0.0 Safari/537.36";
+    }
+
     private void applySystemBars() {
         WindowInsetsController c = getWindow().getInsetsController();
         if (c == null)
@@ -408,6 +460,7 @@ public class WebActivity extends Activity {
 
     private void createWebView() {
         web = new WebView(this);
+        desktopApplied = null; // new WebView: apply the desktop setting without reloading
         web.setBackgroundColor(0xFF000000);
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -442,6 +495,7 @@ public class WebActivity extends Activity {
         clipboard.install(web);
         notifications.install(web);
         speech.install(web);
+        applyDesktopMode();
     }
 
     // ---- back button: a menu, never a silent exit ----
@@ -457,6 +511,8 @@ public class WebActivity extends Activity {
         }
         labels.add(site.fullScreen ? "Exit full screen" : "Full screen");
         actions.add(this::toggleFullScreen);
+        labels.add(site.desktop ? "Mobile site" : "Desktop site");
+        actions.add(this::toggleDesktop);
         labels.add("Reload");
         actions.add(() -> { hideError(); web.reload(); });
         labels.add("Hard reload (ignore cache)");
