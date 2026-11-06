@@ -3,7 +3,11 @@ pluginManagement {
 }
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-    repositories { google(); mavenCentral() }
+    repositories {
+        google(); mavenCentral()
+        // libadb-android, its SPAKE2 library and sun-security-android are only published there
+        maven { url 'https://jitpack.io' }
+    }
 }
 rootProject.name = "HomeDesk"
 include ':app'

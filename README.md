@@ -69,11 +69,14 @@ In HomeDesk every saved web page is called an **app**.
   Touchpad page (Xiaomi HyperOS). Tap to click, tap dragging (tap, tap again and hold to drag or select text),
   natural scrolling, bottom-right corner right-click, three/four finger gestures, pointer acceleration and pointer
   speed, plus Reset to defaults and Android's touchpad gestures tutorial. These are Android's own `touchpad_*` values in
-  Settings.System; Android lets only system/root/shell change them, so HomeDesk changes them through
-  [Shizuku](https://shizuku.rikka.app) (free on Play Store): install it, start it (Wireless debugging on, then Start
-  in Shizuku; again after each restart), then tap Allow HomeDesk. Changes apply right away and survive restarts, so
-  Shizuku only has to run while you change something. Without Shizuku, from a PC:
-  `adb shell settings put system touchpad_tap_dragging 1`.
+  Settings.System; Android lets only system/root/shell change them, so HomeDesk connects to the tablet's own
+  **Wireless debugging** like `adb` on a PC (`AdbShell`, using [libadb-android](https://github.com/MuntashirAkon/libadb-android)).
+  Pair once: tap Pair (Developer options open), turn on Wireless debugging, tap "Pair device with pairing code",
+  then pull down the notifications and type the 6 digits into HomeDesk's "Enter pairing code" notification
+  (or "Type the code here" with Settings in a floating window). Wireless debugging lists HomeDesk under Paired
+  devices. After that the screen works whenever Wireless debugging is on (needs Wi-Fi); turn it off again when done.
+  Changes apply right away and survive restarts. HomeDesk's ADB key is kept in no-backup app storage.
+  From a PC instead: `adb shell settings put system touchpad_tap_dragging 1`.
 
 ## Install over Wi-Fi from a PC
 Pair the phone once under Developer options › Wireless debugging. With Wireless debugging on, the port is shown on

@@ -1,19 +1,22 @@
 package com.papyper.homedesk;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
-import android.net.Uri;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.InputType;
 import android.util.TypedValue;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -26,17 +29,17 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import rikka.shizuku.Shizuku;
-
 /**
  * Touchpad settings for keyboards with a touchpad. Android has them (Settings.System touchpad_*, read by the
  * input system right away) but HyperOS removed the Settings page, and apps may not change these keys.
- * HomeDesk changes them as the shell user through Shizuku (see ShizukuShell).
+ * HomeDesk changes them as the shell user through this tablet's own Wireless debugging (AdbShell).
  */
 public class TouchpadActivity extends Activity {
 
-    private static final int REQUEST_SHIZUKU = 7;
-    private static final int MENU_RESET = 1;
+    private enum State { NOT_PAIRED, CONNECTING, WIRELESS_OFF, READY, ERROR }
+
+    private static final int REQUEST_NOTIFICATIONS = 8;
+    private static final int MENU_RESET = 1, MENU_PAIR = 2;
     private static final String SPEED = "touchpad_pointer_speed";
     private static final int SPEED_MIN = -7, SPEED_MAX = 7;
 
@@ -60,16 +63,13 @@ public class TouchpadActivity extends Activity {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Map<String, Switch> switches = new HashMap<>();
     private TextView status, speedLabel;
-    private Button action;
+    private Button action, action2;
     private SeekBar speed;
     private LinearLayout controls;
-    private ShizukuShell.State state;
+    private State state = State.CONNECTING;
     /** true while values are being shown, so the change listeners don't write them back */
     private boolean showing;
-
-    private final Shizuku.OnBinderReceivedListener binderReceived = this::refresh;
-    private final Shizuku.OnBinderDeadListener binderDead = this::refresh;
-    private final Shizuku.OnRequestPermissionResultListener permissionResult = (code, result) -> refresh();
+    private boolean loading;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -86,12 +86,16 @@ public class TouchpadActivity extends Activity {
         status = new TextView(this);
         status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         content.addView(status);
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        buttons.setPadding(0, Icons.dp(this, 8), 0, 0);
         action = new Button(this);
         action.setAllCaps(false);
-        LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        actionLp.topMargin = Icons.dp(this, 8);
-        content.addView(action, actionLp);
+        buttons.addView(action);
+        action2 = new Button(this);
+        action2.setAllCaps(false);
+        buttons.addView(action2);
+        content.addView(buttons);
 
         controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
@@ -142,8 +146,9 @@ public class TouchpadActivity extends Activity {
 
         TextView note = new TextView(this);
         note.setText("Changes apply right away and stay after a restart. If one doesn't take effect, turn the "
-                + "keyboard off and on.\n\nFrom a PC with ADB instead of Shizuku, for example:\n"
-                + "adb shell settings put system touchpad_tap_dragging 1");
+                + "keyboard off and on.\n\nHomeDesk changes these through this tablet's Wireless debugging, like "
+                + "ADB on a PC, so Wireless debugging only has to be on while you change something. "
+                + "From a PC instead, for example:\nadb shell settings put system touchpad_tap_dragging 1");
         note.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         note.setAlpha(0.55f);
         note.setTextIsSelectable(true);
@@ -153,36 +158,31 @@ public class TouchpadActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.addView(content);
         setContentView(scroll);
-
-        Shizuku.addBinderReceivedListenerSticky(binderReceived, main);
-        Shizuku.addBinderDeadListener(binderDead, main);
-        Shizuku.addRequestPermissionResultListener(permissionResult, main);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        refresh(); // back from Shizuku's app
+        refresh(); // also when coming back from Wireless debugging
     }
 
     @Override
     protected void onDestroy() {
-        Shizuku.removeBinderReceivedListener(binderReceived);
-        Shizuku.removeBinderDeadListener(binderDead);
-        Shizuku.removeRequestPermissionResultListener(permissionResult);
-        io.shutdownNow();
+        io.execute(AdbShell::disconnect);
+        io.shutdown();
         super.onDestroy();
     }
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         menu.add(0, MENU_RESET, 0, "Reset to defaults");
+        menu.add(0, MENU_PAIR, 1, "Pair again");
         return true;
     }
 
     @Override
     public boolean onPrepareOptionsMenu(Menu menu) {
-        menu.findItem(MENU_RESET).setEnabled(state == ShizukuShell.State.READY);
+        menu.findItem(MENU_RESET).setEnabled(state == State.READY);
         return true;
     }
 
@@ -201,7 +201,24 @@ public class TouchpadActivity extends Activity {
                     .show();
             return true;
         }
+        if (item.getItemId() == MENU_PAIR) {
+            startPairing();
+            return true;
+        }
         return super.onOptionsItemSelected(item);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != REQUEST_NOTIFICATIONS)
+            return;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+            startPairing();
+        } else {
+            toast("Without notifications, type the pairing code here instead.");
+            askCode();
+        }
     }
 
     private TextView summary(String text) {
@@ -217,85 +234,175 @@ public class TouchpadActivity extends Activity {
         speedLabel.setText("Pointer speed: " + (v > 0 ? "+" + v : String.valueOf(v)));
     }
 
-    /** Shows what Shizuku needs next, then loads the current values. */
+    // ---- state -------------------------------------------------------------------------------------------
+
+    /** Connects (when paired) and loads the current values; the result decides what the top of the screen says. */
     private void refresh() {
-        if (isFinishing() || isDestroyed())
+        if (isFinishing() || isDestroyed() || loading)
             return;
-        state = ShizukuShell.state(this);
-        action.setVisibility(View.VISIBLE);
-        switch (state) {
-            case NOT_INSTALLED:
-                status.setText("Android hides these settings from apps. HomeDesk can change them with Shizuku, a free "
-                        + "app that gives other apps ADB rights. Install Shizuku, start it, then come back.");
-                action.setText("Get Shizuku");
-                action.setOnClickListener(v -> openUri("market://details?id=" + ShizukuShell.PACKAGE,
-                        "https://play.google.com/store/apps/details?id=" + ShizukuShell.PACKAGE));
-                break;
-            case NOT_RUNNING:
-                status.setText("Shizuku is installed but not running. Open it and tap Start (with Wireless debugging "
-                        + "on). It has to be started again after each restart of the tablet.");
-                action.setText("Open Shizuku");
-                action.setOnClickListener(v -> openShizuku());
-                break;
-            case TOO_OLD:
-                status.setText("This Shizuku is too old. Update it from Play Store.");
-                action.setText("Update Shizuku");
-                action.setOnClickListener(v -> openUri("market://details?id=" + ShizukuShell.PACKAGE,
-                        "https://play.google.com/store/apps/details?id=" + ShizukuShell.PACKAGE));
-                break;
-            case NO_PERMISSION:
-                status.setText("Shizuku is running. Allow HomeDesk to use it.");
-                action.setText("Allow HomeDesk");
-                action.setOnClickListener(v -> Shizuku.requestPermission(REQUEST_SHIZUKU));
-                break;
-            case DENIED:
-                status.setText("HomeDesk was denied in Shizuku. Open Shizuku and allow HomeDesk in its app list.");
-                action.setText("Open Shizuku");
-                action.setOnClickListener(v -> openShizuku());
-                break;
-            case READY:
-                status.setText("Ready. Changes apply right away.");
-                action.setVisibility(View.GONE);
-                break;
+        if (!AdbShell.isPaired(this)) {
+            show(State.NOT_PAIRED, null);
+            loadDirect();
+            return;
         }
-        setControlsEnabled(state == ShizukuShell.State.READY);
-        invalidateOptionsMenu();
-        load();
-    }
-
-    private void setControlsEnabled(boolean on) {
-        for (Switch s : switches.values())
-            s.setEnabled(on);
-        speed.setEnabled(on);
-        controls.setAlpha(on ? 1f : 0.5f);
-    }
-
-    /** Reads the touchpad_* values: through Shizuku when allowed, else directly (Android may refuse that). */
-    private void load() {
-        boolean viaShell = state == ShizukuShell.State.READY;
+        loading = true;
+        show(State.CONNECTING, null);
         io.execute(() -> {
             Map<String, String> values = new HashMap<>();
+            State result;
+            String error = null;
             try {
-                if (viaShell) {
-                    for (String line : ShizukuShell.run("settings", "list", "system").split("\n")) {
-                        int eq = line.indexOf('=');
-                        if (line.startsWith("touchpad_") && eq > 0)
-                            values.put(line.substring(0, eq), line.substring(eq + 1).trim());
-                    }
-                } else {
-                    for (String[] t : TOGGLES)
-                        values.put(t[0], Settings.System.getString(getContentResolver(), t[0]));
-                    values.put(SPEED, Settings.System.getString(getContentResolver(), SPEED));
+                for (String line : AdbShell.run(this, "settings", "list", "system").split("\n")) {
+                    int eq = line.indexOf('=');
+                    if (line.startsWith("touchpad_") && eq > 0)
+                        values.put(line.substring(0, eq), line.substring(eq + 1).trim());
                 }
+                result = State.READY;
+            } catch (AdbShell.WirelessDebuggingOffException e) {
+                result = State.WIRELESS_OFF;
+            } catch (AdbShell.NotPairedException e) {
+                result = State.NOT_PAIRED;
             } catch (Exception e) {
-                if (viaShell)
-                    main.post(() -> toast("Couldn't read the touchpad settings: " + e.getMessage()));
+                result = State.ERROR;
+                error = e.getMessage();
             }
-            main.post(() -> show(values));
+            State r = result;
+            String err = error;
+            main.post(() -> {
+                loading = false;
+                if (isFinishing() || isDestroyed())
+                    return;
+                show(r, err);
+                if (r == State.READY)
+                    showValues(values);
+                else
+                    loadDirect();
+            });
         });
     }
 
-    private void show(Map<String, String> values) {
+    private void show(State s, String error) {
+        state = s;
+        action.setVisibility(View.VISIBLE);
+        action2.setVisibility(View.GONE);
+        switch (s) {
+            case NOT_PAIRED:
+                status.setText("Android hides these settings from apps. HomeDesk changes them through this tablet's "
+                        + "Wireless debugging, like ADB on a PC. Pair it once:\n"
+                        + "1. Tap Pair. Developer options open; turn on Wireless debugging and tap it.\n"
+                        + "2. Tap \"Pair device with pairing code\".\n"
+                        + "3. Pull down the notifications, tap \"Enter pairing code\" on HomeDesk's notification "
+                        + "and type the 6 digits.");
+                action.setText("Pair");
+                action.setOnClickListener(v -> startPairing());
+                action2.setVisibility(View.VISIBLE);
+                action2.setText("Type the code here");
+                action2.setOnClickListener(v -> askCode());
+                break;
+            case CONNECTING:
+                status.setText("Connecting to Wireless debugging…");
+                action.setVisibility(View.GONE);
+                break;
+            case WIRELESS_OFF:
+                status.setText("Turn on Wireless debugging (Developer options, needs Wi-Fi) to change these, then "
+                        + "come back. You can turn it off again when you're done.");
+                action.setText("Open Wireless debugging");
+                action.setOnClickListener(v -> AdbPairing.openWirelessDebugging(this));
+                action2.setVisibility(View.VISIBLE);
+                action2.setText("Try again");
+                action2.setOnClickListener(v -> refresh());
+                break;
+            case READY:
+                status.setText("Connected through Wireless debugging. Changes apply right away.");
+                action.setVisibility(View.GONE);
+                break;
+            case ERROR:
+                status.setText("Couldn't connect: " + error);
+                action.setText("Try again");
+                action.setOnClickListener(v -> refresh());
+                action2.setVisibility(View.VISIBLE);
+                action2.setText("Pair again");
+                action2.setOnClickListener(v -> startPairing());
+                break;
+        }
+        boolean on = s == State.READY;
+        for (Switch sw : switches.values())
+            sw.setEnabled(on);
+        speed.setEnabled(on);
+        controls.setAlpha(on ? 1f : 0.5f);
+        invalidateOptionsMenu();
+    }
+
+    // ---- pairing -------------------------------------------------------------------------------------------
+
+    private void startPairing() {
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            // Android answers at once (denied) when the user refused for good; onRequestPermissionsResult then
+            // falls back to typing the code in HomeDesk.
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQUEST_NOTIFICATIONS);
+            return;
+        }
+        AdbPairing.showCodeNotification(this, "In Wireless debugging tap \"Pair device with pairing code\", "
+                + "then tap \"Enter pairing code\" here and type the 6 digits it shows.");
+        AdbPairing.openWirelessDebugging(this);
+    }
+
+    /** For a floating Settings window next to HomeDesk: type the code into HomeDesk itself. */
+    private void askCode() {
+        EditText code = new EditText(this);
+        code.setInputType(InputType.TYPE_CLASS_NUMBER);
+        code.setHint("6-digit pairing code");
+        int pad = Icons.dp(this, 20);
+        LinearLayout box = new LinearLayout(this);
+        box.setPadding(pad, Icons.dp(this, 8), pad, 0);
+        box.addView(code, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        new AlertDialog.Builder(this)
+                .setTitle("Pairing code")
+                .setMessage("Keep Wireless debugging › Pair device with pairing code open (for example in a "
+                        + "floating window) and type the code it shows.")
+                .setView(box)
+                .setPositiveButton("Pair", (d, w) -> pairWith(code.getText().toString()))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void pairWith(String code) {
+        status.setText("Pairing…");
+        io.execute(() -> {
+            try {
+                AdbShell.pair(this, code);
+                main.post(() -> {
+                    AdbPairing.cancel(this);
+                    toast("HomeDesk is paired.");
+                    refresh();
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    toast("Pairing failed: " + e.getMessage());
+                    refresh();
+                });
+            }
+        });
+    }
+
+    // ---- values --------------------------------------------------------------------------------------------
+
+    /** Without a connection: try reading directly (Android may refuse hidden keys) so the switches aren't blank. */
+    private void loadDirect() {
+        io.execute(() -> {
+            Map<String, String> values = new HashMap<>();
+            try {
+                for (String[] t : TOGGLES)
+                    values.put(t[0], Settings.System.getString(getContentResolver(), t[0]));
+                values.put(SPEED, Settings.System.getString(getContentResolver(), SPEED));
+            } catch (Exception ignored) {
+            }
+            main.post(() -> showValues(values));
+        });
+    }
+
+    private void showValues(Map<String, String> values) {
         if (isFinishing() || isDestroyed())
             return;
         showing = true;
@@ -320,7 +427,7 @@ public class TouchpadActivity extends Activity {
     private void put(String key, String value) {
         io.execute(() -> {
             try {
-                ShizukuShell.run("settings", "put", "system", key, value);
+                AdbShell.run(this, "settings", "put", "system", key, value);
             } catch (Exception e) {
                 main.post(() -> {
                     toast("Couldn't change it: " + e.getMessage());
@@ -334,8 +441,8 @@ public class TouchpadActivity extends Activity {
         io.execute(() -> {
             try {
                 for (String[] t : TOGGLES)
-                    ShizukuShell.run("settings", "delete", "system", t[0]);
-                ShizukuShell.run("settings", "delete", "system", SPEED);
+                    AdbShell.run(this, "settings", "delete", "system", t[0]);
+                AdbShell.run(this, "settings", "delete", "system", SPEED);
             } catch (Exception e) {
                 main.post(() -> toast("Couldn't reset: " + e.getMessage()));
             }
@@ -348,22 +455,6 @@ public class TouchpadActivity extends Activity {
             startActivity(new Intent("com.android.systemui.action.TOUCHPAD_TUTORIAL"));
         } catch (ActivityNotFoundException | SecurityException e) {
             toast("This tablet doesn't have Android's touchpad tutorial.");
-        }
-    }
-
-    private void openShizuku() {
-        Intent i = ShizukuShell.launchIntent(this);
-        if (i != null)
-            startActivity(i);
-        else
-            toast("Couldn't open Shizuku.");
-    }
-
-    private void openUri(String uri, String fallback) {
-        try {
-            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(uri)));
-        } catch (ActivityNotFoundException e) {
-            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(fallback)));
         }
     }
 
