@@ -34,7 +34,7 @@ import java.util.List;
 /** Home screen: the list of saved apps (web pages). Tap opens one full screen; ⋮ edits it. */
 public class MainActivity extends Activity {
 
-    private static final int MENU_ADD = 1, MENU_USAGE = 2;
+    private static final int MENU_ADD = 1, MENU_USAGE = 2, MENU_TOUCHPAD = 3;
     /** Set by "All apps" on a page: show the list instead of jumping to the start app. */
     static final String EXTRA_SHOW_LIST = "show_list";
 
@@ -137,6 +137,8 @@ public class MainActivity extends Activity {
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
         menu.add(0, MENU_USAGE, 1, "Usage")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM | MenuItem.SHOW_AS_ACTION_WITH_TEXT);
+        menu.add(0, MENU_TOUCHPAD, 2, "Touchpad settings")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         return true;
     }
 
@@ -148,6 +150,10 @@ public class MainActivity extends Activity {
         }
         if (item.getItemId() == MENU_USAGE) {
             startActivity(new Intent(this, UsageActivity.class));
+            return true;
+        }
+        if (item.getItemId() == MENU_TOUCHPAD) {
+            startActivity(new Intent(this, TouchpadActivity.class));
             return true;
         }
         return super.onOptionsItemSelected(item);

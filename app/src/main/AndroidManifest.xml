@@ -14,6 +14,8 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <!-- Touchpad screen checks whether Shizuku is installed -->
+        <package android:name="moe.shizuku.privileged.api" />
     </queries>
 
     <application
@@ -39,6 +41,21 @@
             android:name=".UsageActivity"
             android:exported="false"
             android:label="Usage" />
+
+        <!-- Touchpad settings HyperOS hides; changed as the shell user through Shizuku (ShizukuShell). -->
+        <activity
+            android:name=".TouchpadActivity"
+            android:exported="false"
+            android:label="Touchpad" />
+
+        <!-- Shizuku hands its binder to HomeDesk through this provider. The permission keeps normal apps out. -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <!--
           One full-screen WebView per site. documentLaunchMode=intoExisting gives every site its own

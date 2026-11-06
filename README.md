@@ -65,6 +65,15 @@ In HomeDesk every saved web page is called an **app**.
 - Pages keep running in the background (not paused), so remote sessions stay connected while you use other apps,
   until Android itself stops the app or the phone sleeps.
 - Downloads go to the phone's Download folder. File uploads use the normal Android file picker.
+- **Touchpad settings** (⋮ on the app list): for keyboards with a touchpad on tablets whose system hides Android's
+  Touchpad page (Xiaomi HyperOS). Tap to click, tap dragging (tap, tap again and hold to drag or select text),
+  natural scrolling, bottom-right corner right-click, three/four finger gestures, pointer acceleration and pointer
+  speed, plus Reset to defaults and Android's touchpad gestures tutorial. These are Android's own `touchpad_*` values in
+  Settings.System; Android lets only system/root/shell change them, so HomeDesk changes them through
+  [Shizuku](https://shizuku.rikka.app) (free on Play Store): install it, start it (Wireless debugging on, then Start
+  in Shizuku; again after each restart), then tap Allow HomeDesk. Changes apply right away and survive restarts, so
+  Shizuku only has to run while you change something. Without Shizuku, from a PC:
+  `adb shell settings put system touchpad_tap_dragging 1`.
 
 ## Install over Wi-Fi from a PC
 Pair the phone once under Developer options › Wireless debugging. With Wireless debugging on, the port is shown on
