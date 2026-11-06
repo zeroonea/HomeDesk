@@ -168,8 +168,7 @@ public class TouchpadActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        io.execute(AdbShell::disconnect);
-        io.shutdown();
+        io.shutdown(); // AdbShell keeps no connection open between changes
         super.onDestroy();
     }
 

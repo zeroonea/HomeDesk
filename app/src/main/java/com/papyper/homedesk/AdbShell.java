@@ -37,9 +37,16 @@ import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.Date;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 
 import io.github.muntashirakon.adb.AbsAdbConnectionManager;
 import io.github.muntashirakon.adb.AdbPairingRequiredException;
@@ -72,8 +79,20 @@ final class AdbShell {
 
     private static final String PREFS = "adb";
     private static final String KEY_PAIRED = "paired";
-    private static final long FIND_CONNECT_MS = 6000, FIND_PAIRING_MS = 8000; // pairing runs in a broadcast (goAsync ~10 s)
-    private static Manager manager;
+    private static final long FIND_CONNECT_MS = 6000, FIND_PAIRING_MS = 8000;
+    /** Whole operation limits. libadb has no timeout on opening a stream: a dead connection waits forever. */
+    private static final long RUN_TIMEOUT_MS = 20_000, PAIR_TIMEOUT_MS = 25_000, BUSY_TIMEOUT_MS = 30_000;
+
+    /** One operation at a time; tryLock so a stuck one can't block every later call. */
+    private static final ReentrantLock busy = new ReentrantLock();
+    /** Runs the blocking libadb calls, so the caller can give up on them (daemon threads, nothing keeps them). */
+    private static final ExecutorService worker = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "adb-shell");
+        t.setDaemon(true);
+        return t;
+    });
+    /** Last Wireless debugging address that worked (its port changes when Wireless debugging is turned on). */
+    private static volatile InetSocketAddress lastConnect;
 
     private AdbShell() {}
 
@@ -93,37 +112,34 @@ final class AdbShell {
      * Pairs with Wireless debugging using the 6-digit code. Its "Pair device with pairing code" dialog must be open
      * (the pairing service only runs while it shows). Call off the main thread.
      */
-    static synchronized void pair(Context c, String code) throws Exception {
+    static void pair(Context c, String code) throws Exception {
         String digits = code.replaceAll("\\D", "");
         if (digits.length() != 6)
             throw new IOException("The pairing code has 6 digits");
-        InetSocketAddress at = find(c, AdbMdns.SERVICE_TYPE_TLS_PAIRING, FIND_PAIRING_MS);
-        if (at == null)
-            throw new IOException("Couldn't find the pairing code dialog. Keep Wireless debugging › "
-                    + "Pair device with pairing code open, then enter the code it shows.");
-        manager(c).pair(at.getHostString(), at.getPort(), digits);
+        Context app = c.getApplicationContext();
+        limited(PAIR_TIMEOUT_MS, "Pairing didn't finish. Open Pair device with pairing code again.", () -> {
+            InetSocketAddress at = find(app, AdbMdns.SERVICE_TYPE_TLS_PAIRING, FIND_PAIRING_MS);
+            if (at == null)
+                throw new IOException("Couldn't find the pairing code dialog. Keep Wireless debugging › "
+                        + "Pair device with pairing code open, then enter the code it shows.");
+            new Manager(app).pair(at.getHostString(), at.getPort(), digits);
+            return null;
+        });
         setPaired(c, true);
-        disconnect(); // next command connects with the newly trusted key
     }
 
     /**
      * Runs a shell command (arguments are quoted) and returns what it printed. Throws when the command fails,
      * WirelessDebuggingOffException / NotPairedException when it can't connect. Call off the main thread.
      */
-    static synchronized String run(Context c, String... args) throws Exception {
+    static String run(Context c, String... args) throws Exception {
         StringBuilder cmd = new StringBuilder();
         for (String a : args)
             cmd.append(cmd.length() == 0 ? "" : " ").append(quote(a));
         cmd.append("; echo __rc=$?");
-        String out;
-        try {
-            out = exec(c, cmd.toString());
-        } catch (IOException e) {
-            if (e instanceof WirelessDebuggingOffException || e instanceof NotPairedException)
-                throw e;
-            disconnect(); // stale connection (Wireless debugging restarted): try once more
-            out = exec(c, cmd.toString());
-        }
+        Context app = c.getApplicationContext();
+        String out = limited(RUN_TIMEOUT_MS, "Wireless debugging didn't answer. Try again, or turn Wireless "
+                + "debugging off and on.", () -> exec(app, cmd.toString()));
         int at = out.lastIndexOf("__rc=");
         if (at < 0)
             throw new IOException("No answer from the shell");
@@ -139,37 +155,78 @@ final class AdbShell {
         return out;
     }
 
-    static synchronized void disconnect() {
-        if (manager != null) {
+    /**
+     * Runs task on a worker thread, one operation at a time, and gives up after timeoutMs. A task that is stuck
+     * inside libadb is left behind on its daemon thread; it holds only its own Manager (each operation makes a new
+     * one), so later operations still work.
+     */
+    private static <T> T limited(long timeoutMs, String timeoutMessage, Callable<T> task) throws Exception {
+        if (!busy.tryLock(BUSY_TIMEOUT_MS, TimeUnit.MILLISECONDS))
+            throw new IOException("Still busy with the previous change. Try again.");
+        try {
+            Future<T> f = worker.submit(task);
             try {
-                manager.disconnect();
+                return f.get(timeoutMs, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException e) {
+                f.cancel(true);
+                lastConnect = null;
+                throw new IOException(timeoutMessage);
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                throw cause instanceof Exception ? (Exception) cause : new Exception(cause);
+            }
+        } finally {
+            busy.unlock();
+        }
+    }
+
+    /** Connects (fresh connection each time, so a connection Android dropped can't hang it), runs, disconnects. */
+    private static String exec(Context c, String command) throws Exception {
+        Manager m = new Manager(c);
+        try {
+            connect(c, m);
+            try (AdbStream s = m.openStream("shell:" + command); InputStream in = s.openInputStream()) {
+                ByteArrayOutputStream buf = new ByteArrayOutputStream();
+                byte[] b = new byte[4096];
+                int n;
+                while ((n = in.read(b)) >= 0)
+                    buf.write(b, 0, n);
+                return buf.toString(StandardCharsets.UTF_8.name());
+            }
+        } finally {
+            try {
+                m.disconnect();
             } catch (IOException ignored) {
             }
         }
     }
 
-    private static String exec(Context c, String command) throws Exception {
-        Manager m = manager(c);
-        if (!m.isConnected()) {
-            InetSocketAddress at = find(c, AdbMdns.SERVICE_TYPE_TLS_CONNECT, FIND_CONNECT_MS);
-            if (at == null)
-                throw new WirelessDebuggingOffException();
+    private static void connect(Context c, Manager m) throws Exception {
+        InetSocketAddress at = lastConnect;
+        if (at != null) {
             try {
-                if (!m.connect(at.getHostString(), at.getPort()) && !m.isConnected())
-                    throw new IOException("Couldn't connect to Wireless debugging");
+                if (m.connect(at.getHostString(), at.getPort()) || m.isConnected())
+                    return;
             } catch (AdbPairingRequiredException e) {
                 setPaired(c, false);
                 throw new NotPairedException();
+            } catch (IOException e) {
+                // port changed (Wireless debugging was turned off and on): look it up again
             }
+            m.disconnect();
+            lastConnect = null;
         }
-        try (AdbStream s = m.openStream("shell:" + command); InputStream in = s.openInputStream()) {
-            ByteArrayOutputStream buf = new ByteArrayOutputStream();
-            byte[] b = new byte[4096];
-            int n;
-            while ((n = in.read(b)) > 0)
-                buf.write(b, 0, n);
-            return buf.toString(StandardCharsets.UTF_8.name());
+        at = find(c, AdbMdns.SERVICE_TYPE_TLS_CONNECT, FIND_CONNECT_MS);
+        if (at == null)
+            throw new WirelessDebuggingOffException();
+        try {
+            if (!m.connect(at.getHostString(), at.getPort()) && !m.isConnected())
+                throw new IOException("Couldn't connect to Wireless debugging");
+        } catch (AdbPairingRequiredException e) {
+            setPaired(c, false);
+            throw new NotPairedException();
         }
+        lastConnect = at;
     }
 
     /** Finds this tablet's ADB service of the given mDNS type, or null after the timeout. */
@@ -193,12 +250,6 @@ final class AdbShell {
 
     private static String quote(String s) {
         return "'" + s.replace("'", "'\\''") + "'";
-    }
-
-    private static synchronized Manager manager(Context c) throws Exception {
-        if (manager == null)
-            manager = new Manager(c.getApplicationContext());
-        return manager;
     }
 
     /** HomeDesk's ADB identity: an RSA key and a self-signed certificate, made on first use. */
